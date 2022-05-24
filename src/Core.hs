@@ -3,6 +3,7 @@ module Core where
 import RIO
 import qualified RIO.Map as Map
 import qualified RIO.List as List
+import qualified Docker as Docker
 
 data Pipeline
     = Pipeline
@@ -14,24 +15,18 @@ data Step
     = Step
         { name :: StepName
         , commands :: NonEmpty Text
-        , image :: Image
+        , image :: Docker.Image
         }
     deriving (Eq, Show)
 
 data StepResult
-    = StepFailed ContainerExitCode
+    = StepFailed Docker.ContainerExitCode
     | StepSucceeded
     deriving (Eq, Show)
 
-newtype ContainerExitCode = ContainerExitCode Int
-    deriving (Eq, Show)
-
-exitCodeToInt :: ContainerExitCode -> Int
-exitCodeToInt (ContainerExitCode code) = code
-
-exitCodeToStepResults :: ContainerExitCode -> StepResult
+exitCodeToStepResults :: Docker.ContainerExitCode -> StepResult
 exitCodeToStepResults exit =
-    if exitCodeToInt exit == 0
+    if Docker.exitCodeToInt exit == 0
         then StepSucceeded
         else StepFailed exit
 
@@ -74,8 +69,7 @@ data BuildResult
 
 newtype StepName = StepName Text
     deriving (Eq, Show, Ord)
-newtype Image = Image Text
-    deriving (Eq, Show)
+
 
 progress :: Build -> IO Build
 progress build =
@@ -88,7 +82,7 @@ progress build =
                     let s = BuildRunningState { step = step.name }
                     pure $ build{state = BuildRunning s}
         BuildRunning state -> do
-            let exit = ContainerExitCode 0
+            let exit = Docker.ContainerExitCode 0
                 result = exitCodeToStepResults exit
             pure build
                 { state = BuildReady
@@ -99,6 +93,3 @@ progress build =
 
 stepNameToText :: StepName -> Text
 stepNameToText (StepName step) = step
-
-imageToText :: Image -> Text
-imageToText (Image step) = step
