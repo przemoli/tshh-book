@@ -79,6 +79,9 @@ progress build =
                 Left result ->
                     pure $ build{state = BuildFinished result}
                 Right step -> do
+                    let options = Docker.CreateContainerOptions step.image
+                    container <- Docker.createContainer options
+                    Docker.startContainer container
                     let s = BuildRunningState { step = step.name }
                     pure $ build{state = BuildRunning s}
         BuildRunning state -> do
