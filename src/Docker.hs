@@ -11,18 +11,26 @@ data Service
     = Service
         { createContainer :: CreateContainerOptions -> IO ContainerId
         , startContainer :: ContainerId -> IO ()
+        , containerStatus :: ContainerId -> IO ContainerStatus
         }
 
 createService :: IO Service
 createService = do
+    manager <- Socket.newManager "/var/run/docker.sock"
+    let makeReq :: RequestBuilder
+        makeReq path = HTTP.defaultRequest
+                        & HTTP.setRequestManager manager
+                        & HTTP.setRequestPath ("/v1.40" <> (encodeUtf8 path))
     pure Service
-        { createContainer = createContainer_
-        , startContainer = startContainer_
+        { createContainer = createContainer_ makeReq
+        , startContainer = startContainer_ makeReq
+        , containerStatus = containerStatus_ makeReq
         }
 
 data CreateContainerOptions
     = CreateContainerOptions
         { image :: Image
+        , script :: Text
         }
 
 newtype Image = Image Text
@@ -37,38 +45,47 @@ containerIdToText (ContainerId c) = c
 imageToText :: Image -> Text
 imageToText (Image step) = step
 
-createContainer_ :: CreateContainerOptions -> IO ContainerId
-createContainer_ options = do
-    manager <- Socket.newManager "/var/run/docker.sock"
+createContainer_ :: RequestBuilder -> CreateContainerOptions -> IO ContainerId
+createContainer_ makeReq options = do
     let image = imageToText options.image
     let body = Aeson.object
                 [ ("Image", Aeson.toJSON image)
                 , ("Tty", Aeson.toJSON True)
                 , ("Labels", Aeson.object [("quad", "")])
-                , ("Cmd", "echo hello")
                 , ("Entrypoint", Aeson.toJSON [Aeson.String "/bin/sh", "-c"])
+                , ("Cmd", "echo \"$QUAD_SCRIPT\" | /bin/sh")
+                , ("Env", Aeson.toJSON ["QUAD_SCRIPT="<> options.script])
                 ]
-    let req = HTTP.defaultRequest
-            & HTTP.setRequestManager manager
-            & HTTP.setRequestPath "/v1.40/containers/create"
+    let req = makeReq "/containers/create"
             & HTTP.setRequestMethod "POST"
             & HTTP.setRequestBodyJSON body
     let parser = Aeson.withObject "create-container" $ \o -> do
             cId <- o .: "Id"
             pure $ ContainerId cId
     res <- HTTP.httpBS req
-    -- Dump the response to stdout to check what we' are getting back
     parseResponse res parser
 
-startContainer_ :: ContainerId -> IO ()
-startContainer_ container = do
-    manager <- Socket.newManager "/var/run/docker.sock"
-    let path = "/v1.40/containers/" <> containerIdToText container <> "/start"
-    let req = HTTP.defaultRequest
-            & HTTP.setRequestManager manager
-            & HTTP.setRequestPath (encodeUtf8 path)
+startContainer_ :: RequestBuilder -> ContainerId -> IO ()
+startContainer_ makeReq container = do
+    let path = "/containers/" <> (containerIdToText container) <> "/start"
+    let req = makeReq path
             & HTTP.setRequestMethod "POST"
     void $ HTTP.httpBS req
+
+containerStatus_ :: RequestBuilder -> ContainerId -> IO ContainerStatus
+containerStatus_ makeReq container = do
+    let parser = Aeson.withObject "cotainer-inspect" $ \o -> do
+            state <- o .: "State"
+            status <- state .: "Status"
+            case status of
+                "running" -> pure ContainerRunning
+                "exited" -> do
+                    code <- state .: "ExitCode"
+                    pure $ ContainerExited (ContainerExitCode code)
+                other -> pure $ ContainerOther other
+    let req = makeReq $ "/containers/" <> containerIdToText container <> "/json"
+    res <- HTTP.httpBS req
+    parseResponse res parser
 
 parseResponse 
     :: HTTP.Response ByteString
@@ -87,3 +104,11 @@ newtype ContainerExitCode = ContainerExitCode Int
 
 exitCodeToInt :: ContainerExitCode -> Int
 exitCodeToInt (ContainerExitCode code) = code
+
+data ContainerStatus
+    = ContainerRunning
+    | ContainerExited ContainerExitCode
+    | ContainerOther Text
+    deriving (Eq, Show)
+
+type RequestBuilder = Text -> HTTP.Request

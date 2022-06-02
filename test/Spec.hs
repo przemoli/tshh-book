@@ -27,6 +27,29 @@ testPipeline = makePipeline
     , makeStep "Second step" "ubuntu" ["uname -r"]
     ]
 
+testCreateContainer :: Docker.Service -> IO ()
+testCreateContainer docker = do
+    let options = CreateContainerOptions
+                { image = Image "ubuntu"
+                , script = "exit 1"
+                }
+    containerId <- docker.createContainer options
+    status <- docker.containerStatus containerId
+    status `shouldBe` ContainerOther "created"
+
+testStartContainer :: Docker.Service -> IO ()
+testStartContainer docker = do
+    let options = CreateContainerOptions
+                { image = Image "ubuntu"
+                , script = "exit 1"
+                }
+    containerId <- docker.createContainer options
+    status <- docker.containerStatus containerId
+    status `shouldBe` ContainerOther "created"
+    docker.startContainer containerId
+    status2 <- docker.containerStatus containerId
+    status2 `shouldBe` ContainerRunning
+
 testRunSuccess :: Runner.Service -> IO ()
 testRunSuccess runner = do
     build <- runner.prepareBuild $ makePipeline
@@ -57,5 +80,11 @@ main = hspec do
     docker <- runIO Docker.createService
     runner <- runIO $ Runner.createService docker
     beforeAll cleanupDocker $ describe "Quad CI" do
+        it "should create a container" do
+            testCreateContainer docker
+        it "should start a container" do
+            testStartContainer docker
         it "should run a build (success)" do
             testRunSuccess runner
+        it "should run a build (failure)" do
+            testRunFailure runner
