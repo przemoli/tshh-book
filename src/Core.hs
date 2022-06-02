@@ -71,8 +71,8 @@ newtype StepName = StepName Text
     deriving (Eq, Show, Ord)
 
 
-progress :: Build -> IO Build
-progress build =
+progress :: Docker.Service -> Build -> IO Build
+progress docker build =
     case build.state of
         BuildReady -> 
             case buildHasNextStep build of
@@ -80,8 +80,8 @@ progress build =
                     pure $ build{state = BuildFinished result}
                 Right step -> do
                     let options = Docker.CreateContainerOptions step.image
-                    container <- Docker.createContainer options
-                    Docker.startContainer container
+                    container <- docker.createContainer options
+                    docker.startContainer container
                     let s = BuildRunningState { step = step.name }
                     pure $ build{state = BuildRunning s}
         BuildRunning state -> do
