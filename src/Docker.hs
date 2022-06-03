@@ -12,6 +12,7 @@ data Service
         { createContainer :: CreateContainerOptions -> IO ContainerId
         , startContainer :: ContainerId -> IO ()
         , containerStatus :: ContainerId -> IO ContainerStatus
+        , createVolume :: IO Volume
         }
 
 createService :: IO Service
@@ -25,12 +26,14 @@ createService = do
         { createContainer = createContainer_ makeReq
         , startContainer = startContainer_ makeReq
         , containerStatus = containerStatus_ makeReq
+        , createVolume = createVolume_ makeReq
         }
 
 data CreateContainerOptions
     = CreateContainerOptions
         { image :: Image
         , script :: Text
+        , volume :: Volume
         }
 
 newtype Image = Image Text
@@ -48,6 +51,7 @@ imageToText (Image step) = step
 createContainer_ :: RequestBuilder -> CreateContainerOptions -> IO ContainerId
 createContainer_ makeReq options = do
     let image = imageToText options.image
+    let bind = volumeToText options.volume <> ":/app"
     let body = Aeson.object
                 [ ("Image", Aeson.toJSON image)
                 , ("Tty", Aeson.toJSON True)
@@ -55,6 +59,8 @@ createContainer_ makeReq options = do
                 , ("Entrypoint", Aeson.toJSON [Aeson.String "/bin/sh", "-c"])
                 , ("Cmd", "echo \"$QUAD_SCRIPT\" | /bin/sh")
                 , ("Env", Aeson.toJSON ["QUAD_SCRIPT="<> options.script])
+                , ("WorkingDir", "/app")
+                , ("HostConfig", Aeson.object [ ("Binds", Aeson.toJSON [bind])])
                 ]
     let req = makeReq "/containers/create"
             & HTTP.setRequestMethod "POST"
@@ -112,3 +118,26 @@ data ContainerStatus
     deriving (Eq, Show)
 
 type RequestBuilder = Text -> HTTP.Request
+
+newtype Volume = Volume Text
+    deriving (Eq, Show)
+
+volumeToText :: Volume -> Text
+volumeToText (Volume v) = v
+
+createVolume_ :: RequestBuilder -> IO Volume
+createVolume_ makeReq = do
+    let body = Aeson.object
+                [ ("Labels", Aeson.object [("quad", "")])
+                ]
+    let req = makeReq "/volumes/create"
+            & HTTP.setRequestMethod "POST"
+            & HTTP.setRequestBodyJSON body
+    let parser = Aeson.withObject "create-volume" $ \o -> do
+            name <- o .: "Name"
+            pure $ Volume name
+    res <- HTTP.httpBS req
+    parseResponse res parser
+
+
+    
