@@ -6,7 +6,9 @@ import Core
 import Docker
 import Runner
 import Test.Hspec
+import qualified RIO.ByteString as ByteString
 import qualified RIO.Map as Map
+import qualified RIO.Set as Set
 import qualified System.Process.Typed as Process
 
 makeStep :: Text -> Text -> [Text] -> Step
@@ -20,6 +22,11 @@ makeStep name image commands
 makePipeline :: [Step] -> Pipeline
 makePipeline steps =
     Pipeline { steps = NonEmpty.Partial.fromList steps }
+
+emptyHooks :: Runner.Hooks
+emptyHooks = Runner.Hooks
+    { logCollected = \_ -> pure ()
+    }
 
 testPipeline :: Pipeline
 testPipeline = makePipeline
@@ -58,7 +65,7 @@ testRunSuccess runner = do
         [ makeStep "First step" "ubuntu" ["date"]
         , makeStep "Second step" "ubuntu" ["uname -r"]
         ]
-    result <- runner.runBuild build
+    result <- runner.runBuild emptyHooks build
     result.state `shouldBe` BuildFinished BuildSucceeded
     Map.elems result.completedSteps `shouldBe` [StepSucceeded, StepSucceeded]
 
@@ -67,7 +74,7 @@ testRunFailure runner = do
     build <- runner.prepareBuild $ makePipeline
         [ makeStep "Should fail" "ubuntu" ["exit 1"]
         ]
-    result <- runner.runBuild build
+    result <- runner.runBuild emptyHooks build
     result.state `shouldBe` BuildFinished BuildFailed
     Map.elems result.completedSteps `shouldBe` [StepFailed (Docker.ContainerExitCode 1)]
 
@@ -77,14 +84,34 @@ testSharedWorkspace docker runner = do
                 [ makeStep "Create file" "ubuntu" ["echo hello > test"]
                 , makeStep "Read file" "ubuntu" ["cat test"]
                 ]
-    result <- runner.runBuild build
+    result <- runner.runBuild emptyHooks build
     result.state `shouldBe` BuildFinished BuildSucceeded
     Map.elems result.completedSteps `shouldBe` [StepSucceeded, StepSucceeded]
+
+testLogCollection :: Runner.Service -> IO ()
+testLogCollection runner = do
+    expected <- newMVar $ Set.fromList ["hello", "world", "Linux"]
+    let onLog :: Log -> IO ()
+        onLog log = do
+            remaining <- readMVar expected
+            forM_ remaining $ \word -> do
+                case ByteString.breakSubstring word log.output of
+                    (_, "") -> pure () -- Not found
+                    _ -> modifyMVar_ expected (pure . Set.delete word)
+    let hooks = Runner.Hooks { logCollected = onLog }
+    build <- runner.prepareBuild $ makePipeline
+        [ makeStep "Long step" "ubuntu" ["echo hello", "sleep 2", "echo world"]
+        , makeStep "Echo Linux" "ubuntu" ["uname -s"]
+        ]
+    result <- runner.runBuild hooks build
+    result.state `shouldBe` BuildFinished BuildSucceeded
+    Map.elems result.completedSteps `shouldBe` [StepSucceeded, StepSucceeded]
+    readMVar expected >>= \logs -> logs `shouldBe` Set.empty
 
 cleanupDocker :: IO ()
 cleanupDocker = void do
     Process.readProcessStdout "docker rm -f $(docker ps -aq --filter \"label=quad\")"
-    Process.readProcessStdout "docker volume rm -f $(docker volume ls -q --filter \"label=quad\""
+    Process.readProcessStdout "docker volume rm -f $(docker volume ls -q --filter \"label=quad\")"
 
 
 
@@ -101,5 +128,7 @@ main = hspec do
             testRunSuccess runner
         it "should run a build (failure)" do
             testRunFailure runner
-        it "shoudl share workspace between steps" do
+        it "should share workspace between steps" do
             testSharedWorkspace docker runner
+        it "should collect logs" do
+            testLogCollection runner

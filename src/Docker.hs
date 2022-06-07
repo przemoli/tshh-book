@@ -6,6 +6,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson.Types
 import qualified Socket
 import Data.Aeson ((.:))
+import qualified Data.Time.Clock.POSIX as Time
 
 data Service
     = Service
@@ -13,6 +14,7 @@ data Service
         , startContainer :: ContainerId -> IO ()
         , containerStatus :: ContainerId -> IO ContainerStatus
         , createVolume :: IO Volume
+        , fetchLogs :: FetchLogsOptions -> IO ByteString
         }
 
 createService :: IO Service
@@ -27,6 +29,7 @@ createService = do
         , startContainer = startContainer_ makeReq
         , containerStatus = containerStatus_ makeReq
         , createVolume = createVolume_ makeReq
+        , fetchLogs = fetchLogs_ makeReq
         }
 
 data CreateContainerOptions
@@ -139,5 +142,22 @@ createVolume_ makeReq = do
     res <- HTTP.httpBS req
     parseResponse res parser
 
+data FetchLogsOptions = FetchLogsOptions
+    { container :: ContainerId
+    , since :: Time.POSIXTime
+    , until :: Time.POSIXTime
+    }
 
-    
+fetchLogs_ :: RequestBuilder -> FetchLogsOptions -> IO ByteString
+fetchLogs_ makeReq options = do
+    let timestampToText t = tshow (round t :: Int)
+    let url =
+            "/containers/"
+            <> containerIdToText options.container
+            <> "/logs?stdout=true&stderr=true&since="
+            <> timestampToText options.since
+            <> "&until="
+            <> timestampToText options.until
+    res <- HTTP.httpBS $ makeReq url
+    pure $ HTTP.getResponseBody res
+
