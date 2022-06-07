@@ -84,6 +84,7 @@ testSharedWorkspace docker runner = do
 cleanupDocker :: IO ()
 cleanupDocker = void do
     Process.readProcessStdout "docker rm -f $(docker ps -aq --filter \"label=quad\")"
+    Process.readProcessStdout "docker volume rm -f $(docker volume ls -q --filter \"label=quad\""
 
 
 
