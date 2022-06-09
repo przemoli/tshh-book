@@ -15,7 +15,7 @@ makeStep :: Text -> Text -> [Text] -> Step
 makeStep name image commands
     = Step
         { name = StepName name
-        , image = Docker.Image image
+        , image = Docker.Image  { name = image, tag = "latest" }
         , commands = NonEmpty.Partial.fromList commands
         }
 
@@ -37,7 +37,7 @@ testPipeline = makePipeline
 testCreateContainer :: Docker.Service -> IO ()
 testCreateContainer docker = do
     let options = CreateContainerOptions
-                { image = Image "ubuntu"
+                { image = Image "ubuntu""latest"
                 , script = "exit 1"
                 , volume = Volume "testCreateContainer"
                 }
@@ -48,7 +48,7 @@ testCreateContainer docker = do
 testStartContainer :: Docker.Service -> IO ()
 testStartContainer docker = do
     let options = CreateContainerOptions
-                { image = Image "ubuntu"
+                { image = Image "ubuntu" "latest"
                 , script = "exit 1"
                 , volume = Volume "testStartContainer"
                 }
@@ -100,13 +100,23 @@ testLogCollection runner = do
                     _ -> modifyMVar_ expected (pure . Set.delete word)
     let hooks = Runner.Hooks { logCollected = onLog }
     build <- runner.prepareBuild $ makePipeline
-        [ makeStep "Long step" "ubuntu" ["echo hello", "sleep 1", "echo world"]
+        [ makeStep "Long step" "ubuntu" ["echo hello", "sleep 2", "echo world"]
         , makeStep "Echo Linux" "ubuntu" ["uname -s"]
         ]
     result <- runner.runBuild hooks build
     result.state `shouldBe` BuildFinished BuildSucceeded
     Map.elems result.completedSteps `shouldBe` [StepSucceeded, StepSucceeded]
     readMVar expected >>= \logs -> logs `shouldBe` Set.empty
+
+testImagePull :: Runner.Service -> IO ()
+testImagePull runner = do
+    Process.readProcessStdout "docker rmi -f busybox"
+    build <- runner.prepareBuild $makePipeline
+        [ makeStep "First step" "busybox" ["date"]
+        ]
+    result <- runner.runBuild emptyHooks build
+    result.state `shouldBe` BuildFinished BuildSucceeded
+    Map.elems result.completedSteps `shouldBe` [StepSucceeded]
 
 cleanupDocker :: IO ()
 cleanupDocker = void do
@@ -132,3 +142,5 @@ main = hspec do
             testSharedWorkspace docker runner
         it "should collect logs" do
             testLogCollection runner
+        it "should pull images" do
+            testImagePull runner
