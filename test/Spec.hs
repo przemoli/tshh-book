@@ -100,7 +100,7 @@ testLogCollection runner = do
                     _ -> modifyMVar_ expected (pure . Set.delete word)
     let hooks = Runner.Hooks { logCollected = onLog }
     build <- runner.prepareBuild $ makePipeline
-        [ makeStep "Long step" "ubuntu" ["echo hello", "sleep 2", "echo world"]
+        [ makeStep "Long step" "ubuntu" ["echo hello", "sleep 1", "echo world"]
         , makeStep "Echo Linux" "ubuntu" ["uname -s"]
         ]
     result <- runner.runBuild hooks build

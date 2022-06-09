@@ -31,7 +31,7 @@ runBuild_ docker hooks build = do
                 BuildFinished _ ->
                     pure newBuild
                 _ -> do
-                    threadDelay (1 * 1000 * 1000 `div` 10)
+                    threadDelay (1 * 1000 * 1000)
                     loop newBuild newCollection
 
 prepareBuild_ :: Docker.Service -> Pipeline -> IO Build
