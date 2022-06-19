@@ -10,6 +10,7 @@ import qualified RIO.ByteString as ByteString
 import qualified RIO.Map as Map
 import qualified RIO.Set as Set
 import qualified System.Process.Typed as Process
+import qualified Data.Yaml as Yaml
 
 makeStep :: Text -> Text -> [Text] -> Step
 makeStep name image commands
@@ -118,11 +119,12 @@ testImagePull runner = do
     result.state `shouldBe` BuildFinished BuildSucceeded
     Map.elems result.completedSteps `shouldBe` [StepSucceeded]
 
-cleanupDocker :: IO ()
-cleanupDocker = void do
-    Process.readProcessStdout "docker rm -f $(docker ps -aq --filter \"label=quad\")"
-    Process.readProcessStdout "docker volume rm -f $(docker volume ls -q --filter \"label=quad\")"
-
+testYamlDecoding :: Runner.Service -> IO ()
+testYamlDecoding runner = do
+    pipeline <- Yaml.decodeFileThrow "test/pipeline.sample.yml"
+    build <- runner.prepareBuild pipeline
+    result <- runner.runBuild emptyHooks build
+    result.state `shouldBe` BuildFinished BuildSucceeded
 
 
 main :: IO ()
@@ -144,3 +146,12 @@ main = hspec do
             testLogCollection runner
         it "should pull images" do
             testImagePull runner
+        it "should decode pipelines" do
+            testYamlDecoding runner
+        
+
+
+cleanupDocker :: IO ()
+cleanupDocker = void do
+    Process.readProcessStdout "docker rm -f $(docker ps -aq --filter \"label=quad\")"
+    Process.readProcessStdout "docker volume rm -f $(docker volume ls -q --filter \"label=quad\")"

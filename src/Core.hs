@@ -7,12 +7,13 @@ import qualified Docker as Docker
 import qualified RIO.NonEmpty as NonEmpty
 import qualified RIO.Text as Text
 import qualified Data.Time.Clock.POSIX as Time
+import qualified Data.Aeson as Aeson
 
 data Pipeline
     = Pipeline
         { steps :: NonEmpty Step
         }
-    deriving (Eq, Show)
+    deriving (Eq, Show, Generic, Aeson.FromJSON)
 
 data Step
     = Step
@@ -20,7 +21,7 @@ data Step
         , commands :: NonEmpty Text
         , image :: Docker.Image
         }
-    deriving (Eq, Show)
+    deriving (Eq, Show, Generic, Aeson.FromJSON)
 
 data StepResult
     = StepFailed Docker.ContainerExitCode
@@ -74,7 +75,7 @@ data BuildResult
     deriving (Eq, Show)
 
 newtype StepName = StepName Text
-    deriving (Eq, Show, Ord)
+    deriving (Eq, Show, Ord, Generic, Aeson.FromJSON)
 
 
 progress :: Docker.Service -> Build -> IO Build
